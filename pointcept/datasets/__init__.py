@@ -20,5 +20,8 @@ from .waymo import WaymoDataset
 from .modelnet import ModelNetDataset
 from .shapenet_part import ShapeNetPartDataset
 
+# welding
+from .welding import WeldingDataset
+
 # dataloader
 from .dataloader import MultiDatasetDataloader
