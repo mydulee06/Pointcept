@@ -11,6 +11,7 @@ from collections import abc
 import numpy as np
 import torch
 from importlib import import_module
+from scipy.interpolate import splev
 
 
 class AverageMeter(object):
@@ -157,6 +158,35 @@ def import_modules_from_strings(imports, allow_failed_imports=False):
     if single_import:
         imported = imported[0]
     return imported
+
+
+def build_bspline_knots(batch_size, pts_size, degree, method="uniform", t_min=0, t_max=1):
+    if method == "uniform":
+        knots = torch.linspace(t_min, t_max, pts_size - degree + 1).repeat(batch_size, 1)
+        knots = torch.nn.functional.pad(knots, (degree,0), "constant", 0)
+        knots = torch.nn.functional.pad(knots, (0,degree), "constant", 1)
+
+    return knots
+
+
+def build_bspline_fn_batch(t: torch.Tensor, c: torch.Tensor, k: int):
+    dtype = t.dtype
+    device = t.device
+
+    B = len(t)
+    t = t.cpu().numpy()
+    c = c.cpu().numpy()
+
+    def bspline(u: torch.Tensor):
+        u = u.cpu().numpy()
+
+        out = []
+        for i in range(B):
+            out.append(splev(u[i], (t[i], c[i], k)))
+        out = torch.tensor(out, dtype=dtype, device=device).transpose(1,2)
+        return out
+
+    return bspline
 
 
 class DummyClass:

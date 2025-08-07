@@ -221,3 +221,24 @@ class DiceLoss(nn.Module):
                 total_loss += dice_loss
         loss = total_loss / num_classes
         return self.loss_weight * loss
+
+
+@LOSSES.register_module()
+class MSELoss(nn.Module):
+    def __init__(
+        self,
+        size_average=None,
+        reduce=None,
+        reduction="mean",
+        loss_weight=1.0,
+    ):
+        super(MSELoss, self).__init__()
+        self.loss_weight = loss_weight
+        self.loss = nn.MSELoss(
+            size_average=size_average,
+            reduce=reduce,
+            reduction=reduction,
+        )
+
+    def forward(self, pred, target):
+        return self.loss(pred, target) * self.loss_weight

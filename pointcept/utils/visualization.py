@@ -32,7 +32,10 @@ def get_point_cloud(coord, color=None, verbose=True):
     for i in range(len(coord)):
         coord_ = to_numpy(coord[i])
         if color is not None:
-            color_ = to_numpy(color[i])
+            color_ = color[i]
+            if len(color_) == 1:
+                color_ = color_.repeat(len(coord_), 0)
+            color_ = to_numpy(color_)
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(coord_)
         pcd.colors = o3d.utility.Vector3dVector(

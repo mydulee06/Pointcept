@@ -226,3 +226,63 @@ class DefaultClassifier(nn.Module):
             return dict(loss=loss, cls_logits=cls_logits)
         else:
             return dict(cls_logits=cls_logits)
+
+
+@MODELS.register_module()
+class DefaultBsplineCoefPredictor(nn.Module):
+    def __init__(
+        self,
+        backbone=None,
+        criteria=None,
+        spl_coef_channels=3,
+        num_spl_coef=64,
+        backbone_embed_dim=256,
+    ):
+        super().__init__()
+        self.backbone = build_model(backbone)
+        self.criteria = build_criteria(criteria)
+        self.spl_coef_channels = spl_coef_channels
+        self.num_spl_coef = num_spl_coef
+        self.backbone_embed_dim = backbone_embed_dim
+        # Simple
+        self.spl_coef_head = (
+            nn.Linear(backbone_embed_dim, spl_coef_channels*num_spl_coef)
+        )
+        # Complex
+        # self.spl_coef_head = nn.Sequential(
+        #     nn.Linear(backbone_embed_dim, 256),
+        #     nn.BatchNorm1d(256),
+        #     nn.ReLU(inplace=True),
+        #     nn.Dropout(p=0.5),
+        #     nn.Linear(256, 256),
+        #     nn.BatchNorm1d(256),
+        #     nn.ReLU(inplace=True),
+        #     nn.Dropout(p=0.5),
+        #     nn.Linear(256, spl_coef_channels*num_spl_coef),
+        # )
+
+    def forward(self, input_dict):
+        point = Point(input_dict)
+        point = self.backbone(point)
+        # Backbone added after v1.5.0 return Point instead of feat
+        # And after v1.5.0 feature aggregation for classification operated in classifier
+        # TODO: remove this part after make all backbone return Point only.
+        if isinstance(point, Point):
+            point.feat = torch_scatter.segment_csr(
+                src=point.feat,
+                indptr=nn.functional.pad(point.offset, (1, 0)),
+                reduce="mean",
+            )
+            feat = point.feat
+        else:
+            feat = point
+        spl_coef_pred = self.spl_coef_head(feat)
+        spl_coef_pred = spl_coef_pred.view(-1, self.spl_coef_channels, self.num_spl_coef)
+        if self.training:
+            loss = self.criteria(spl_coef_pred, input_dict["spl_coef"])
+            return dict(loss=loss)
+        elif "spl_coef" in input_dict.keys():
+            loss = self.criteria(spl_coef_pred, input_dict["spl_coef"])
+            return dict(loss=loss, spl_coef_pred=spl_coef_pred)
+        else:
+            return dict(spl_coef_pred=spl_coef_pred)

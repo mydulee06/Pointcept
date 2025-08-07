@@ -13,7 +13,8 @@ import pointops
 from uuid import uuid4
 
 import pointcept.utils.comm as comm
-from pointcept.utils.misc import intersection_and_union_gpu
+from pointcept.utils.misc import intersection_and_union_gpu, build_bspline_knots, build_bspline_fn_batch
+from pytorch3d.loss import chamfer_distance
 
 from .default import HookBase
 from .builder import HOOKS
@@ -621,3 +622,86 @@ class InsSegEvaluator(HookBase):
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
         self.trainer.comm_info["current_metric_value"] = all_ap_50  # save for saver
         self.trainer.comm_info["current_metric_name"] = "AP50"  # save for saver
+
+
+@HOOKS.register_module()
+class BsplineEvaluator(HookBase):
+    def __init__(self, knots_from=["uniform"], spline_degree=None, eval_u_size=1001):
+        # Availble options: uniform, dataset
+        # TODO: add pred option if needed.
+        self.knots_from = knots_from
+        self.k = spline_degree
+        self.eval_u_size = eval_u_size
+
+    def after_epoch(self):
+        if self.trainer.cfg.evaluate:
+            self.eval()
+
+    def eval(self):
+        self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
+        self.trainer.model.eval()
+        for i, input_dict in enumerate(self.trainer.val_loader):
+            for key in input_dict.keys():
+                if isinstance(input_dict[key], torch.Tensor):
+                    input_dict[key] = input_dict[key].cuda(non_blocking=True)
+            with torch.no_grad():
+                output_dict = self.trainer.model(input_dict)
+            loss = output_dict["loss"]
+            spl_coef_pred = output_dict["spl_coef_pred"]
+            B = input_dict["spl_k"].shape[0]
+            N = spl_coef_pred.shape[-1]
+            K = self.k if self.k is not None else input_dict["spl_k"][0].item()
+            u_eval = torch.linspace(0, 1, self.eval_u_size, device=spl_coef_pred.device).repeat(B, 1)
+            chamf_dist_unif = 0
+            chamf_dist_data = 0
+            if "uniform" in self.knots_from:
+                unif_t = build_bspline_knots(B, N, K, method="uniform").to(spl_coef_pred.device)
+                bspline = build_bspline_fn_batch(unif_t, spl_coef_pred, K)
+                edge_pred_unif = bspline(u_eval)
+                chamf_dist_unif, _ = chamfer_distance(input_dict["edge"], edge_pred_unif)
+            if "dataset" in self.knots_from:
+                data_t = input_dict["spl_t"]
+                bspline = build_bspline_fn_batch(data_t, spl_coef_pred, K)
+                edge_pred_data = bspline(u_eval)
+                chamf_dist_data, _ = chamfer_distance(input_dict["edge"], edge_pred_data)
+            self.trainer.storage.put_scalar("chamf_dist_unif", chamf_dist_unif)
+            self.trainer.storage.put_scalar("chamf_dist_data", chamf_dist_data)
+            # Here there is no need to sync since sync happened in dist.all_reduce
+            self.trainer.storage.put_scalar("val_loss", loss.item())
+            self.trainer.logger.info(
+                "Test: [{iter}/{max_iter}] "
+                "Loss {loss:.4f} ".format(
+                    iter=i + 1, max_iter=len(self.trainer.val_loader), loss=loss.item()
+                )
+            )
+        loss_avg = self.trainer.storage.history("val_loss").avg
+        chamf_dist_unif_avg = self.trainer.storage.history("chamf_dist_unif").avg
+        chamf_dist_data_avg = self.trainer.storage.history("chamf_dist_data").avg
+        self.trainer.logger.info(
+            "Val result: chamf_dist_unif/chamf_dist_data {:.4f}/{:.4f}.".format(
+                chamf_dist_unif_avg, chamf_dist_data_avg
+            )
+        )
+        current_epoch = self.trainer.epoch + 1
+        if self.trainer.writer is not None:
+            self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
+            self.trainer.writer.add_scalar("val/chamf_dist_unif", chamf_dist_unif_avg, current_epoch)
+            self.trainer.writer.add_scalar("val/chamf_dist_data", chamf_dist_data_avg, current_epoch)
+            if self.trainer.cfg.enable_wandb:
+                wandb.log(
+                    {
+                        "Epoch": current_epoch,
+                        "val/loss": loss_avg,
+                        "val/chamf_dist_unif": chamf_dist_unif_avg,
+                        "val/chamf_dist_data": chamf_dist_data_avg,
+                    },
+                    step=wandb.run.step,
+                )
+        self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
+        self.trainer.comm_info["current_metric_value"] = chamf_dist_unif_avg  # save for saver
+        self.trainer.comm_info["current_metric_name"] = "chamf_dist_unif"  # save for saver
+
+    def after_train(self):
+        self.trainer.logger.info(
+            "Best {}: {:.4f}".format("allAcc", self.trainer.best_metric_value)
+        )
