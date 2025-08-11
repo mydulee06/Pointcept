@@ -189,6 +189,19 @@ def build_bspline_fn_batch(t: torch.Tensor, c: torch.Tensor, k: int):
     return bspline
 
 
+def compute_point_clouds_distance(points1: torch.Tensor, points2: torch.Tensor, reduction="mean"):
+    point_wise_dist = (points1[:,None] - points2[:,:,None]).norm(dim=-1)
+    near_dist_12_mean = point_wise_dist.min(dim=1)[0].mean(dim=1)
+    near_dist_21_mean = point_wise_dist.min(dim=2)[0].mean(dim=1)
+
+    near_dist_mean = (near_dist_12_mean + near_dist_21_mean) / 2
+
+    if reduction == "mean":
+        near_dist_mean = near_dist_mean.mean()
+
+    return near_dist_mean
+
+
 class DummyClass:
     def __init__(self):
         pass

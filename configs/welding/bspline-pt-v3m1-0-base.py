@@ -3,18 +3,20 @@ _base_ = ["../_base_/default_runtime.py"]
 save_path = "exp/welding/bspline-pt-v3m1-0-base"
 
 # misc custom setting
+seed = 42
 batch_size = 8  # bs: total bs in all gpus
 num_worker = 1
 # Mixing two point clouds into one. (ref: https://arxiv.org/pdf/2110.02210)
 mix_prob = 0.0
 empty_cache = False
 enable_amp = True
+num_spl_coef = 16
 
 # model settings
 model = dict(
     type="DefaultBsplineCoefPredictor",
     spl_coef_channels=3,    # x, y, z
-    num_spl_coef=64,
+    num_spl_coef=num_spl_coef,
     backbone_embed_dim=512,
     backbone=dict(
         type="PT-v3m1",
@@ -77,7 +79,7 @@ spline_coef_keys = ["spl_c"]
 batch_keys = ["edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"]
 
 data = dict(
-    num_spl_coef=64,
+    num_spl_coef=num_spl_coef,
     spline_coef_keys=spline_coef_keys,
     train=dict(
         type=dataset_type,

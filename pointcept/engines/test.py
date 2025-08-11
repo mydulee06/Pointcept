@@ -31,9 +31,9 @@ from pointcept.utils.misc import (
     make_dirs,
     build_bspline_knots,
     build_bspline_fn_batch,
+    compute_point_clouds_distance,
 )
 from pointcept.utils.visualization import get_point_cloud
-from pytorch3d.loss import chamfer_distance
 
 try:
     import pointops
@@ -1343,8 +1343,8 @@ class BsplineTester(TesterBase):
         logger = get_root_logger()
         logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
         batch_time = AverageMeter()
-        chamf_dist_unif_meter = AverageMeter()
-        chamf_dist_data_meter = AverageMeter()
+        pcd_dist_unif_meter = AverageMeter()
+        pcd_dist_data_meter = AverageMeter()
         target_meter = AverageMeter()
         self.model.eval()
 
@@ -1357,53 +1357,55 @@ class BsplineTester(TesterBase):
                 output_dict = self.model(input_dict)
             loss = output_dict["loss"]
             spl_coef_pred = output_dict["spl_coef_pred"]
+            spl_coef_pred = input_dict["spl_c"].clone()
+            spl_coef_pred += 0.001*torch.randn_like(spl_coef_pred)
             B = input_dict["spl_k"].shape[0]
             N = spl_coef_pred.shape[-1]
             K = self.k if self.k is not None else input_dict["spl_k"][0].item()
             u_eval = torch.linspace(0, 1, self.eval_u_size, device=spl_coef_pred.device).repeat(B, 1)
-            chamf_dist_unif = 0
-            chamf_dist_data = 0
+            pcd_dist_unif = 0
+            pcd_dist_data = 0
             if "uniform" in self.knots_from:
                 unif_t = build_bspline_knots(B, N, K, method="uniform").to(spl_coef_pred.device)
                 bspline = build_bspline_fn_batch(unif_t, spl_coef_pred, K)
                 edge_pred_unif = bspline(u_eval)
-                chamf_dist_unif, _ = chamfer_distance(input_dict["edge"], edge_pred_unif)
+                pcd_dist_unif = compute_point_clouds_distance(input_dict["edge"], edge_pred_unif)
             if "dataset" in self.knots_from:
                 data_t = input_dict["spl_t"]
                 bspline = build_bspline_fn_batch(data_t, spl_coef_pred, K)
                 edge_pred_data = bspline(u_eval)
-                chamf_dist_data, _ = chamfer_distance(input_dict["edge"], edge_pred_data)
-            chamf_dist_unif_meter.update(chamf_dist_unif)
-            chamf_dist_data_meter.update(chamf_dist_data)
+                pcd_dist_data = compute_point_clouds_distance(input_dict["edge"], edge_pred_data)
+            pcd_dist_unif_meter.update(pcd_dist_unif)
+            pcd_dist_data_meter.update(pcd_dist_data)
             batch_time.update(time.time() - end)
 
             logger.info(
                 "Test: [{}/{}] "
                 "Batch {batch_time.val:.3f} ({batch_time.avg:.3f}) "
                 "Loss {loss:.3f} "
-                "chamf_dist_unif {chamf_dist_unif:.4f} "
-                "chamf_dist_data {chamf_dist_data:.4f} ".format(
+                "pcd_dist_unif {pcd_dist_unif:.4f} "
+                "pcd_dist_data {pcd_dist_data:.4f} ".format(
                     i + 1,
                     len(self.test_loader),
                     batch_time=batch_time,
                     loss=loss.item(),
-                    chamf_dist_unif=chamf_dist_unif,
-                    chamf_dist_data=chamf_dist_data,
+                    pcd_dist_unif=pcd_dist_unif,
+                    pcd_dist_data=pcd_dist_data,
                 )
             )
 
             if self.vis:
-                # Vis edge
-                scene_pcd = get_point_cloud(input_dict["coord"], input_dict["color"]/255, verbose=False)[0]
-                edge_gt_pcd = get_point_cloud(input_dict["edge"][0], color=np.array([[0, 1, 0]]), verbose=False)[0]
-                edge_pred_pcd = get_point_cloud(edge_pred_unif[0], color=np.array([[1, 0, 0]]), verbose=False)[0]
-                o3d.visualization.draw_geometries([scene_pcd, edge_gt_pcd, edge_pred_pcd])
-
                 # Vis gt vs pred
                 plt.plot(input_dict["spl_c"][0].view(-1).cpu(), label="gt")
                 plt.plot(spl_coef_pred[0].view(-1).cpu(), label="pred")
                 plt.legend()
                 plt.show()
+
+                # Vis edge
+                scene_pcd = get_point_cloud(input_dict["coord"], input_dict["color"]/255, verbose=False)[0]
+                edge_gt_pcd = get_point_cloud(input_dict["edge"][0], color=np.array([[0, 1, 0]]), verbose=False)[0]
+                edge_pred_pcd = get_point_cloud(edge_pred_unif[0], color=np.array([[1, 0, 0]]), verbose=False)[0]
+                o3d.visualization.draw_geometries([scene_pcd, edge_gt_pcd, edge_pred_pcd])
 
                 # Debugging
                 # edge_gt_bspline = build_bspline_fn_batch(data_t, input_dict["spl_c"], K)
@@ -1413,8 +1415,8 @@ class BsplineTester(TesterBase):
 
 
         logger.info(
-            "Val result: chamf_dist_unif/chamf_dist_data {:.4f}/{:.4f}.".format(
-                chamf_dist_unif_meter.avg, chamf_dist_data_meter.avg
+            "Val result: pcd_dist_unif/pcd_dist_data {:.4f}/{:.4f}.".format(
+                pcd_dist_unif_meter.avg, pcd_dist_data_meter.avg
             )
         )
         logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")

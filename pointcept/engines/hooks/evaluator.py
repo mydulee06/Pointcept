@@ -13,8 +13,12 @@ import pointops
 from uuid import uuid4
 
 import pointcept.utils.comm as comm
-from pointcept.utils.misc import intersection_and_union_gpu, build_bspline_knots, build_bspline_fn_batch
-from pytorch3d.loss import chamfer_distance
+from pointcept.utils.misc import (
+    intersection_and_union_gpu,
+    build_bspline_knots,
+    build_bspline_fn_batch,
+    compute_point_clouds_distance,
+)
 
 from .default import HookBase
 from .builder import HOOKS
@@ -652,20 +656,20 @@ class BsplineEvaluator(HookBase):
             N = spl_coef_pred.shape[-1]
             K = self.k if self.k is not None else input_dict["spl_k"][0].item()
             u_eval = torch.linspace(0, 1, self.eval_u_size, device=spl_coef_pred.device).repeat(B, 1)
-            chamf_dist_unif = 0
-            chamf_dist_data = 0
+            pcd_dist_unif = 0
+            pcd_dist_data = 0
             if "uniform" in self.knots_from:
                 unif_t = build_bspline_knots(B, N, K, method="uniform").to(spl_coef_pred.device)
                 bspline = build_bspline_fn_batch(unif_t, spl_coef_pred, K)
                 edge_pred_unif = bspline(u_eval)
-                chamf_dist_unif, _ = chamfer_distance(input_dict["edge"], edge_pred_unif)
+                pcd_dist_unif = compute_point_clouds_distance(input_dict["edge"], edge_pred_unif)
             if "dataset" in self.knots_from:
                 data_t = input_dict["spl_t"]
                 bspline = build_bspline_fn_batch(data_t, spl_coef_pred, K)
                 edge_pred_data = bspline(u_eval)
-                chamf_dist_data, _ = chamfer_distance(input_dict["edge"], edge_pred_data)
-            self.trainer.storage.put_scalar("chamf_dist_unif", chamf_dist_unif)
-            self.trainer.storage.put_scalar("chamf_dist_data", chamf_dist_data)
+                pcd_dist_data = compute_point_clouds_distance(input_dict["edge"], edge_pred_data)
+            self.trainer.storage.put_scalar("pcd_dist_unif", pcd_dist_unif)
+            self.trainer.storage.put_scalar("pcd_dist_data", pcd_dist_data)
             # Here there is no need to sync since sync happened in dist.all_reduce
             self.trainer.storage.put_scalar("val_loss", loss.item())
             self.trainer.logger.info(
@@ -675,31 +679,31 @@ class BsplineEvaluator(HookBase):
                 )
             )
         loss_avg = self.trainer.storage.history("val_loss").avg
-        chamf_dist_unif_avg = self.trainer.storage.history("chamf_dist_unif").avg
-        chamf_dist_data_avg = self.trainer.storage.history("chamf_dist_data").avg
+        pcd_dist_unif_avg = self.trainer.storage.history("pcd_dist_unif").avg
+        pcd_dist_data_avg = self.trainer.storage.history("pcd_dist_data").avg
         self.trainer.logger.info(
-            "Val result: chamf_dist_unif/chamf_dist_data {:.4f}/{:.4f}.".format(
-                chamf_dist_unif_avg, chamf_dist_data_avg
+            "Val result: pcd_dist_unif/pcd_dist_data {:.4f}/{:.4f}.".format(
+                pcd_dist_unif_avg, pcd_dist_data_avg
             )
         )
         current_epoch = self.trainer.epoch + 1
         if self.trainer.writer is not None:
             self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
-            self.trainer.writer.add_scalar("val/chamf_dist_unif", chamf_dist_unif_avg, current_epoch)
-            self.trainer.writer.add_scalar("val/chamf_dist_data", chamf_dist_data_avg, current_epoch)
+            self.trainer.writer.add_scalar("val/pcd_dist_unif", pcd_dist_unif_avg, current_epoch)
+            self.trainer.writer.add_scalar("val/pcd_dist_data", pcd_dist_data_avg, current_epoch)
             if self.trainer.cfg.enable_wandb:
                 wandb.log(
                     {
                         "Epoch": current_epoch,
                         "val/loss": loss_avg,
-                        "val/chamf_dist_unif": chamf_dist_unif_avg,
-                        "val/chamf_dist_data": chamf_dist_data_avg,
+                        "val/pcd_dist_unif": pcd_dist_unif_avg,
+                        "val/pcd_dist_data": pcd_dist_data_avg,
                     },
                     step=wandb.run.step,
                 )
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
-        self.trainer.comm_info["current_metric_value"] = chamf_dist_unif_avg  # save for saver
-        self.trainer.comm_info["current_metric_name"] = "chamf_dist_unif"  # save for saver
+        self.trainer.comm_info["current_metric_value"] = pcd_dist_unif_avg  # save for saver
+        self.trainer.comm_info["current_metric_name"] = "pcd_dist_unif"  # save for saver
 
     def after_train(self):
         self.trainer.logger.info(
