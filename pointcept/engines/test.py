@@ -1357,8 +1357,6 @@ class BsplineTester(TesterBase):
                 output_dict = self.model(input_dict)
             loss = output_dict["loss"]
             spl_coef_pred = output_dict["spl_coef_pred"]
-            spl_coef_pred = input_dict["spl_c"].clone()
-            spl_coef_pred += 0.001*torch.randn_like(spl_coef_pred)
             B = input_dict["spl_k"].shape[0]
             N = spl_coef_pred.shape[-1]
             K = self.k if self.k is not None else input_dict["spl_k"][0].item()

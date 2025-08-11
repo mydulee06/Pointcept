@@ -674,8 +674,14 @@ class BsplineEvaluator(HookBase):
             self.trainer.storage.put_scalar("val_loss", loss.item())
             self.trainer.logger.info(
                 "Test: [{iter}/{max_iter}] "
-                "Loss {loss:.4f} ".format(
-                    iter=i + 1, max_iter=len(self.trainer.val_loader), loss=loss.item()
+                "Loss {loss:.4f} "
+                "pcd_dist_unif {pcd_dist_unif:.4f} "
+                "pcd_dist_data {pcd_dist_data:.4f} ".format(
+                    iter=i + 1,
+                    max_iter=len(self.trainer.val_loader),
+                    loss=loss.item(),
+                    pcd_dist_unif=pcd_dist_unif,
+                    pcd_dist_data=pcd_dist_data,
                 )
             )
         loss_avg = self.trainer.storage.history("val_loss").avg
