@@ -1181,6 +1181,15 @@ class InstanceParser(object):
         return data_dict
 
 
+@TRANSFORMS.register_module()
+class RemoveNonSeg(object):
+    def __call__(self, data_dict):
+        segment = data_dict["segment"]
+        mask = segment != -1
+        data_dict = index_operator(data_dict, mask)
+        return data_dict
+
+
 class Compose(object):
     def __init__(self, cfg=None):
         self.cfg = cfg if cfg is not None else []

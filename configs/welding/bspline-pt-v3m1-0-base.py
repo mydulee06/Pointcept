@@ -107,6 +107,7 @@ data = dict(
             # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             # Grid down sampling.
+            dict(type="RemoveNonSeg"),
             dict(
                 type="GridSample",
                 grid_size=0.002,
@@ -138,6 +139,7 @@ data = dict(
         transform=[
             # dict(type="CenterShift", apply_z=True),
             # dict(type="Copy", keys_dict={"segment": "origin_segment"}),
+            dict(type="RemoveNonSeg"),
             dict(
                 type="GridSample",
                 grid_size=0.002,
@@ -165,6 +167,7 @@ data = dict(
         split="test",
         data_root=data_root,
         transform=[
+            dict(type="RemoveNonSeg"),
             dict(
                 type="GridSample",
                 grid_size=0.002,

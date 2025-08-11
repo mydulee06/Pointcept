@@ -702,7 +702,7 @@ class BsplineEvaluator(HookBase):
                     step=wandb.run.step,
                 )
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
-        self.trainer.comm_info["current_metric_value"] = pcd_dist_unif_avg  # save for saver
+        self.trainer.comm_info["current_metric_value"] = 1 / pcd_dist_unif_avg  # save for saver
         self.trainer.comm_info["current_metric_name"] = "pcd_dist_unif"  # save for saver
 
     def after_train(self):
