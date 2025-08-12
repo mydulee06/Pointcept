@@ -11,6 +11,7 @@ mix_prob = 0.0
 empty_cache = False
 enable_amp = True
 num_spl_coef = 16
+use_normal = False
 
 # model settings
 model = dict(
@@ -19,7 +20,7 @@ model = dict(
     backbone_out_channels=64,
     backbone=dict(
         type="PT-v3m1",
-        in_channels=2,
+        in_channels=5 if use_normal else 2,
         order=("z", "z-trans", "hilbert", "hilbert-trans"),
         stride=(2, 2, 2, 2),
         enc_depths=(2, 2, 2, 6, 2),
@@ -51,7 +52,7 @@ model = dict(
         pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
     ),
     criteria=[
-        dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1),
+        dict(type="CrossEntropyLoss", weight=[0.1, 1.0], loss_weight=1.0, ignore_index=-1),
         dict(type="LovaszLoss", mode="multiclass", loss_weight=1.0, ignore_index=-1),
     ],
 )
@@ -77,6 +78,8 @@ data_root = "data/welding"
 spline_coef_keys = ["spl_c"]
 # Keys to make batch i.e. N x M x ... -> B x N x M x ... (Pointcept collate_fn do concat data in default).
 batch_keys = ["edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"]
+
+collect_keys = ["coord", "grid_coord", "segment", "obj_segment"]
 
 data = dict(
     num_classes=2,
@@ -111,7 +114,7 @@ data = dict(
             # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             # Grid down sampling.
-            # dict(type="RemoveNonSeg"),
+            # dict(type="RemoveNonSeg", key="obj_segment"),
             dict(
                 type="GridSample",
                 grid_size=0.002,
@@ -127,9 +130,9 @@ data = dict(
             dict(
                 type="Collect",
                 # These keys are only remained in dataloader.
-                keys=("coord", "grid_coord", "segment", "obj_segment", "edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"),
+                keys=collect_keys,
                 # Keys used for point features, "feat"
-                feat_keys=("obj_segment_onehot",),
+                feat_keys=("obj_segment_onehot", "normal") if use_normal else ("obj_segment_onehot",),
             ),
         ],
         test_mode=False,
@@ -143,7 +146,7 @@ data = dict(
         transform=[
             # dict(type="CenterShift", apply_z=True),
             # dict(type="Copy", keys_dict={"segment": "origin_segment"}),
-            # dict(type="RemoveNonSeg"),
+            # dict(type="RemoveNonSeg", key="obj_segment"),
             dict(
                 type="GridSample",
                 grid_size=0.002,
@@ -157,8 +160,8 @@ data = dict(
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "segment", "obj_segment", "edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"),
-                feat_keys=("obj_segment_onehot",),
+                keys=collect_keys,
+                feat_keys=("obj_segment_onehot", "normal") if use_normal else ("obj_segment_onehot",),
             ),
         ],
         test_mode=False,
@@ -171,7 +174,7 @@ data = dict(
         split="test",
         data_root=data_root,
         transform=[
-            # dict(type="RemoveNonSeg"),
+            # dict(type="RemoveNonSeg", key="obj_segment"),
             dict(
                 type="GridSample",
                 grid_size=0.002,
@@ -182,11 +185,14 @@ data = dict(
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "color", "segment", "obj_segment", "edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"),
-                feat_keys=("obj_segment_onehot",),
+                keys=collect_keys+["color"],
+                feat_keys=("obj_segment_onehot", "normal") if use_normal else ("obj_segment_onehot",),
             ),
         ],
         # Disable test mode due to all coverage point cloud in test mode.
         test_mode=False,
     ),
 )
+
+# Tester
+test = dict(type="SimpleSemSegTester", verbose=True)

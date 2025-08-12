@@ -48,6 +48,7 @@ class WeldingDataset(DefaultDataset):
         data_dict["index_valid_keys"] = [
             "coord",
             "color",
+            "normal",
             "segment",
             "obj_segment",
             "obj_segment_onehot",

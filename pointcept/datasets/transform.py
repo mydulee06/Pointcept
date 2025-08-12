@@ -1183,8 +1183,11 @@ class InstanceParser(object):
 
 @TRANSFORMS.register_module()
 class RemoveNonSeg(object):
+    def __init__(self, key):
+        self.key = key
+
     def __call__(self, data_dict):
-        segment = data_dict["segment"]
+        segment = data_dict[self.key]
         mask = segment != -1
         data_dict = index_operator(data_dict, mask)
         return data_dict

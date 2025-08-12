@@ -1422,3 +1422,120 @@ class BsplineTester(TesterBase):
     @staticmethod
     def collate_fn(batch):
         return collate_fn(batch)
+
+
+@TESTERS.register_module()
+class SimpleSemSegTester(TesterBase):
+    def test(self):
+        assert self.test_loader.batch_size == 1
+        logger = get_root_logger()
+        logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
+
+        batch_time = AverageMeter()
+        intersection_meter = AverageMeter()
+        union_meter = AverageMeter()
+        target_meter = AverageMeter()
+        self.model.eval()
+
+        record = {}
+        # fragment inference
+        for idx, data_dict in enumerate(self.test_loader):
+            start = time.time()
+            data_dict = data_dict[0]  # current assume batch size is 1
+            data_name = f"test_{idx}"
+            for key in data_dict.keys():
+                if isinstance(data_dict[key], torch.Tensor):
+                    data_dict[key] = data_dict[key].cuda(non_blocking=True)
+            with torch.no_grad():
+                output_dict = self.model(data_dict)
+            pred = output_dict["seg_logits"]
+            pred = pred.max(1)[1]
+            segment = data_dict.pop("segment")
+
+            intersection, union, target = intersection_and_union(
+                pred.cpu().numpy(), segment.cpu().numpy(), self.cfg.data.num_classes, self.cfg.data.ignore_index
+            )
+            intersection_meter.update(intersection)
+            union_meter.update(union)
+            target_meter.update(target)
+            record[data_name] = dict(
+                intersection=intersection, union=union, target=target
+            )
+
+            mask = union != 0
+            iou_class = intersection / (union + 1e-10)
+            iou = np.mean(iou_class[mask])
+            acc = sum(intersection) / (sum(target) + 1e-10)
+
+            m_iou = np.mean(intersection_meter.sum / (union_meter.sum + 1e-10))
+            m_acc = np.mean(intersection_meter.sum / (target_meter.sum + 1e-10))
+
+            batch_time.update(time.time() - start)
+            logger.info(
+                "Test: {} [{}/{}]-{} "
+                "Batch {batch_time.val:.3f} ({batch_time.avg:.3f}) "
+                "Accuracy {acc:.4f} ({m_acc:.4f}) "
+                "mIoU {iou:.4f} ({m_iou:.4f})".format(
+                    data_name,
+                    idx + 1,
+                    len(self.test_loader),
+                    segment.size,
+                    batch_time=batch_time,
+                    acc=acc,
+                    m_acc=m_acc,
+                    iou=iou,
+                    m_iou=m_iou,
+                )
+            )
+
+            if self.verbose:
+                coord = data_dict["coord"]
+                gt_mask = segment == 1
+                pred_mask = pred == 1
+                scene_pcd = get_point_cloud(coord, data_dict["color"]/255, verbose=False)[0]
+                edge_gt_pcd = get_point_cloud(coord[gt_mask & ~pred_mask], color=np.array([[0, 1, 0]]), verbose=False)[0]
+                edge_pred_gt_pcd = get_point_cloud(coord[gt_mask & pred_mask], color=np.array([[0, 0, 1]]), verbose=False)[0]
+                edge_pred_pcd = get_point_cloud(coord[~gt_mask & pred_mask], color=np.array([[1, 0, 0]]), verbose=False)[0]
+                o3d.visualization.draw_geometries([scene_pcd, edge_gt_pcd, edge_pred_gt_pcd, edge_pred_pcd])
+
+        logger.info("Syncing ...")
+        comm.synchronize()
+        record_sync = comm.gather(record, dst=0)
+
+        if comm.is_main_process():
+            record = {}
+            for _ in range(len(record_sync)):
+                r = record_sync.pop()
+                record.update(r)
+                del r
+            intersection = np.sum(
+                [meters["intersection"] for _, meters in record.items()], axis=0
+            )
+            union = np.sum([meters["union"] for _, meters in record.items()], axis=0)
+            target = np.sum([meters["target"] for _, meters in record.items()], axis=0)
+
+            iou_class = intersection / (union + 1e-10)
+            accuracy_class = intersection / (target + 1e-10)
+            mIoU = np.mean(iou_class)
+            mAcc = np.mean(accuracy_class)
+            allAcc = sum(intersection) / (sum(target) + 1e-10)
+
+            logger.info(
+                "Val result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(
+                    mIoU, mAcc, allAcc
+                )
+            )
+            for i in range(self.cfg.data.num_classes):
+                logger.info(
+                    "Class_{idx} - {name} Result: iou/accuracy {iou:.4f}/{accuracy:.4f}".format(
+                        idx=i,
+                        name=self.cfg.data.names[i],
+                        iou=iou_class[i],
+                        accuracy=accuracy_class[i],
+                    )
+                )
+            logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
+
+    @staticmethod
+    def collate_fn(batch):
+        return batch
