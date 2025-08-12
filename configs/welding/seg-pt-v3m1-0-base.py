@@ -1,6 +1,6 @@
 _base_ = ["../_base_/default_runtime.py"]
 
-save_path = "exp/welding/bspline-pt-v3m1-0-base"
+save_path = "exp/welding/seg-pt-v3m1-0-base"
 
 # misc custom setting
 seed = 42
@@ -14,10 +14,9 @@ num_spl_coef = 16
 
 # model settings
 model = dict(
-    type="DefaultBsplineCoefPredictor",
-    spl_coef_channels=3,    # x, y, z
-    num_spl_coef=num_spl_coef,
-    backbone_embed_dim=512,
+    type="DefaultSegmentorV2",
+    num_classes=2,
+    backbone_out_channels=64,
     backbone=dict(
         type="PT-v3m1",
         in_channels=2,
@@ -43,7 +42,7 @@ model = dict(
         enable_flash=True,
         upcast_attention=False,
         upcast_softmax=False,
-        cls_mode=True, # No decoder if True, else use decoder.
+        cls_mode=False,
         pdnorm_bn=False,
         pdnorm_ln=False,
         pdnorm_decouple=True,
@@ -52,7 +51,8 @@ model = dict(
         pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
     ),
     criteria=[
-        dict(type="MSELoss", loss_weight=1.0),
+        dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1),
+        dict(type="LovaszLoss", mode="multiclass", loss_weight=1.0, ignore_index=-1),
     ],
 )
 
@@ -79,8 +79,12 @@ spline_coef_keys = ["spl_c"]
 batch_keys = ["edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"]
 
 data = dict(
-    num_spl_coef=num_spl_coef,
-    spline_coef_keys=spline_coef_keys,
+    num_classes=2,
+    ignore_index=-1,
+    names=[
+        "none",
+        "edge",
+    ],
     train=dict(
         type=dataset_type,
         spline_coef_keys=spline_coef_keys,
@@ -123,7 +127,7 @@ data = dict(
             dict(
                 type="Collect",
                 # These keys are only remained in dataloader.
-                keys=("coord", "grid_coord", "obj_segment", "edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"),
+                keys=("coord", "grid_coord", "segment", "obj_segment", "edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"),
                 # Keys used for point features, "feat"
                 feat_keys=("obj_segment_onehot",),
             ),
@@ -153,7 +157,7 @@ data = dict(
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "obj_segment", "edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"),
+                keys=("coord", "grid_coord", "segment", "obj_segment", "edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"),
                 feat_keys=("obj_segment_onehot",),
             ),
         ],
@@ -178,7 +182,7 @@ data = dict(
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "color", "obj_segment", "edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"),
+                keys=("coord", "grid_coord", "color", "segment", "obj_segment", "edge", "edge_ds", "spl_t", "spl_c", "spl_k", "spl_coef"),
                 feat_keys=("obj_segment_onehot",),
             ),
         ],
@@ -186,15 +190,3 @@ data = dict(
         test_mode=False,
     ),
 )
-
-# hooks
-hooks = [
-    dict(type="CheckpointLoader"),
-    dict(type="IterationTimer", warmup_iter=2),
-    dict(type="InformationWriter"),
-    dict(type="BsplineEvaluator", knots_from=["uniform", "dataset"], eval_u_size=501),
-    dict(type="CheckpointSaver", save_freq=None),
-]
-
-# tester
-test = dict(type="BsplineTester", knots_from=["uniform", "dataset"], eval_u_size=501, vis=True)

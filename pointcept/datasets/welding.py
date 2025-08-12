@@ -16,8 +16,10 @@ class WeldingDataset(DefaultDataset):
     VALID_ASSETS = [
         "coord",
         "color",
+        "normal",
         "segment",
-        "segment_onehot",
+        "obj_segment",
+        "obj_segment_onehot",
         "edge",
         "edge_ds",
         "spl_t",
@@ -33,8 +35,8 @@ class WeldingDataset(DefaultDataset):
     def get_data(self, idx):
         data_dict = super().get_data(idx)
 
-        if "segment_onehot" not in data_dict:
-            data_dict["segment_onehot"] = segment2onehot(data_dict["segment"], 2)
+        if "obj_segment_onehot" not in data_dict:
+            data_dict["obj_segment_onehot"] = segment2onehot(data_dict["obj_segment"], 2)
 
         if self.spline_coef_keys is not None:
             data_dict["spl_coef"] = np.concatenate([data_dict[key] for key in self.spline_coef_keys])
@@ -47,7 +49,8 @@ class WeldingDataset(DefaultDataset):
             "coord",
             "color",
             "segment",
-            "segment_onehot",
+            "obj_segment",
+            "obj_segment_onehot",
         ]
 
         return data_dict
