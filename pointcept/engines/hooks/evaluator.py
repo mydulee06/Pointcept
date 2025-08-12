@@ -110,8 +110,8 @@ class ClsEvaluator(HookBase):
 
 @HOOKS.register_module()
 class SemSegEvaluator(HookBase):
-    def __init__(self, write_cls_iou=False):
-        self.write_cls_iou = write_cls_iou
+    def __init__(self, write_cls_metric=False):
+        self.write_cls_metric = write_cls_metric
 
     def before_train(self):
         if self.trainer.writer is not None and self.trainer.cfg.enable_wandb:
@@ -209,11 +209,16 @@ class SemSegEvaluator(HookBase):
                     },
                     step=wandb.run.step,
                 )
-            if self.write_cls_iou:
+            if self.write_cls_metric:
                 for i in range(self.trainer.cfg.data.num_classes):
                     self.trainer.writer.add_scalar(
                         f"val/cls_{i}-{self.trainer.cfg.data.names[i]} IoU",
                         iou_class[i],
+                        current_epoch,
+                    )
+                    self.trainer.writer.add_scalar(
+                        f"val/cls_{i}-{self.trainer.cfg.data.names[i]} Acc",
+                        acc_class[i],
                         current_epoch,
                     )
                 if self.trainer.cfg.enable_wandb:
@@ -222,6 +227,9 @@ class SemSegEvaluator(HookBase):
                             {
                                 "Epoch": current_epoch,
                                 f"val/cls_{i}-{self.trainer.cfg.data.names[i]} IoU": iou_class[
+                                    i
+                                ],
+                                f"val/cls_{i}-{self.trainer.cfg.data.names[i]} Acc": acc_class[
                                     i
                                 ],
                             },
