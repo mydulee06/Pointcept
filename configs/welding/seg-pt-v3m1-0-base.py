@@ -201,7 +201,7 @@ hooks = [
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(type="SemSegEvaluator", write_cls_metric=True),
-    dict(type="CheckpointSaver", save_freq=None),
+    dict(type="CheckpointSaver", save_freq=20, hf_upload=True),
     dict(type="PreciseEvaluator", test_last=False),
 ]
 

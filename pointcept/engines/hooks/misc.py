@@ -167,8 +167,21 @@ class InformationWriter(HookBase):
 
 @HOOKS.register_module()
 class CheckpointSaver(HookBase):
-    def __init__(self, save_freq=None):
+    def __init__(self, save_freq=None, hf_upload=False):
         self.save_freq = save_freq  # None or int, None indicate only save model last
+        self.hf_upload = hf_upload
+        self.hf_api = None
+        if hf_upload:
+            from huggingface_hub import HfApi
+            from huggingface_hub import utils as HfUtils
+            from concurrent.futures import Future
+            self.hf_api = HfApi()
+            self.username = self.hf_api.whoami()["name"]
+            if not self.hf_api.repo_exists(f"{self.username}/pointcept", repo_type="model"):
+                self.hf_api.create_repo(repo_id=f"{self.username}/pointcept", repo_type="model")
+            self.hf_upload_future = Future()
+            self.hf_upload_future.set_result("FINISHED")
+            HfUtils.disable_progress_bars()
 
     def after_epoch(self):
         if is_main_process():
@@ -224,6 +237,15 @@ class CheckpointSaver(HookBase):
                         f"epoch_{self.trainer.epoch + 1}.pth",
                     ),
                 )
+                if self.hf_upload and self.hf_upload_future.done():
+                    self.trainer.logger.info("Uploading checkpoint to huggingface in background.")
+                    self.hf_upload_future = self.hf_api.upload_file(
+                        path_or_fileobj=os.path.join(self.trainer.cfg.save_path, "model", "model_last.pth"),
+                        path_in_repo=os.path.join(self.trainer.cfg.save_path, "model_last.pth"),
+                        repo_id=f"{self.username}/pointcept",
+                        repo_type="model",
+                        run_as_future=True,
+                    )
 
 
 @HOOKS.register_module()
