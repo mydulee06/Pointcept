@@ -170,7 +170,7 @@ data = dict(
     test=dict(
         type=dataset_type,
         spline_coef_keys=spline_coef_keys,
-        batch_keys=batch_keys,
+        batch_keys=batch_keys+["visible_edge"],
         split="test",
         data_root=data_root,
         transform=[
@@ -185,7 +185,7 @@ data = dict(
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=collect_keys+["color"],
+                keys=collect_keys+["color", "visible_edge"],
                 feat_keys=("obj_segment_onehot", "normal") if use_normal else ("obj_segment_onehot",),
             ),
         ],

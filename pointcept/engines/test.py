@@ -17,6 +17,7 @@ import torch.nn.functional as F
 import torch.utils.data
 import open3d as o3d
 import matplotlib.pyplot as plt
+from PIL import Image
 
 from .defaults import create_ddp_model
 import pointcept.utils.comm as comm
@@ -32,6 +33,9 @@ from pointcept.utils.misc import (
     build_bspline_knots,
     build_bspline_fn_batch,
     compute_point_clouds_distance,
+    fit_spline,
+    robust_curve_from_pointcloud,
+    image_from_point_clouds,
 )
 from pointcept.utils.visualization import get_point_cloud
 
@@ -1438,7 +1442,7 @@ class SimpleSemSegTester(TesterBase):
         self.model.eval()
 
         record = {}
-        # fragment inference
+        line_errs = []
         for idx, data_dict in enumerate(self.test_loader):
             start = time.time()
             data_dict = data_dict[0]  # current assume batch size is 1
@@ -1479,7 +1483,7 @@ class SimpleSemSegTester(TesterBase):
                     data_name,
                     idx + 1,
                     len(self.test_loader),
-                    segment.size,
+                    segment.size()[0],
                     batch_time=batch_time,
                     acc=acc,
                     m_acc=m_acc,
@@ -1488,15 +1492,44 @@ class SimpleSemSegTester(TesterBase):
                 )
             )
 
+            coord = data_dict["coord"]
+            gt_mask = segment == 1
+            pred_mask = pred == 1
+
+            # u = np.linspace(0, 1, 500)
+            # tck, spl_fn = fit_spline(coord[pred_mask].cpu().numpy(), s=0.000075)
+            # spl_pts = spl_fn(u)
+            res = robust_curve_from_pointcloud(coord[pred_mask].cpu().numpy(), voxel_size=0.02, sor_k=16, sor_std_ratio=1.0,
+                                               knn_k=8, spline_s=0.00005, iter_refine=2, outlier_thresh_factor=3.0, plot=False)
+
+            save_path = os.path.join(self.cfg.save_path, "result")
+            make_dirs(save_path)
+
+            scene_pcd = get_point_cloud(coord, data_dict["color"]/255, verbose=False)[0]
+            edge_pred_pcd = get_point_cloud(coord[pred_mask], color=np.array([[1, 0, 0]]), verbose=False)[0]
+            edge_FN_pcd = get_point_cloud(coord[gt_mask & ~pred_mask], color=np.array([[0, 1, 0]]), verbose=False)[0]
+            edge_TP_pcd = get_point_cloud(coord[gt_mask & pred_mask], color=np.array([[0, 0, 1]]), verbose=False)[0]
+            edge_FP_pcd = get_point_cloud(coord[~gt_mask & pred_mask], color=np.array([[1, 0, 0]]), verbose=False)[0]
+            # spl_pcd = get_point_cloud(spl_pts, color=np.array([[0, 1, 1]]), verbose=False)[0]
+            spl_pcd = get_point_cloud(res["curve_points"], color=np.array([[0, 1, 1]]), verbose=False)[0]
+            visible_edge_pcd = get_point_cloud(data_dict["visible_edge"][0], color=np.array([[1, 0, 0]]), verbose=False)[0]
+            line_err = np.mean(visible_edge_pcd.compute_point_cloud_distance(spl_pcd))
+            line_errs.append(line_err)
+            print(f"Line detection error {data_name}: {line_err:.5f}m")
+
+            K = np.array([
+                [1020.,0.,336.],
+                [0.,1020.,188.],
+                [0.,0.,1.],
+            ])
+            rgb, depth = image_from_point_clouds([scene_pcd, edge_pred_pcd, spl_pcd], K, np.eye(4), 376, 672)
+            Image.fromarray(rgb).save(os.path.join(save_path, f"{data_name}.png"))
+
             if self.verbose:
-                coord = data_dict["coord"]
-                gt_mask = segment == 1
-                pred_mask = pred == 1
-                scene_pcd = get_point_cloud(coord, data_dict["color"]/255, verbose=False)[0]
-                edge_gt_pcd = get_point_cloud(coord[gt_mask & ~pred_mask], color=np.array([[0, 1, 0]]), verbose=False)[0]
-                edge_pred_gt_pcd = get_point_cloud(coord[gt_mask & pred_mask], color=np.array([[0, 0, 1]]), verbose=False)[0]
-                edge_pred_pcd = get_point_cloud(coord[~gt_mask & pred_mask], color=np.array([[1, 0, 0]]), verbose=False)[0]
-                o3d.visualization.draw_geometries([scene_pcd, edge_gt_pcd, edge_pred_gt_pcd, edge_pred_pcd])
+                o3d.visualization.draw_geometries([scene_pcd, edge_FN_pcd, edge_TP_pcd, edge_FP_pcd, spl_pcd])
+
+        print("Mean line error: ", np.mean(line_errs))
+        print("Std line error: ", np.std(line_errs))
 
         logger.info("Syncing ...")
         comm.synchronize()

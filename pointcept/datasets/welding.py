@@ -22,6 +22,7 @@ class WeldingDataset(DefaultDataset):
         "obj_segment_onehot",
         "edge",
         "edge_ds",
+        "visible_edge",
         "spl_t",
         "spl_c",
         "spl_k",
