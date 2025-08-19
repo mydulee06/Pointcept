@@ -1500,7 +1500,7 @@ class SimpleSemSegTester(TesterBase):
             # tck, spl_fn = fit_spline(coord[pred_mask].cpu().numpy(), s=0.000075)
             # spl_pts = spl_fn(u)
             res = robust_curve_from_pointcloud(coord[pred_mask].cpu().numpy(), voxel_size=0.02, sor_k=16, sor_std_ratio=1.0,
-                                               knn_k=8, spline_s=0.00005, iter_refine=2, outlier_thresh_factor=3.0, plot=False)
+                                               knn_k=8, spline_s=0.0005, iter_refine=2, outlier_thresh_factor=3.0, plot=False)
 
             save_path = os.path.join(self.cfg.save_path, "result")
             make_dirs(save_path)
@@ -1526,7 +1526,7 @@ class SimpleSemSegTester(TesterBase):
             Image.fromarray(rgb).save(os.path.join(save_path, f"{data_name}.png"))
 
             if self.verbose:
-                o3d.visualization.draw_geometries([scene_pcd, edge_FN_pcd, edge_TP_pcd, edge_FP_pcd, spl_pcd])
+                o3d.visualization.draw_geometries([scene_pcd, edge_FN_pcd, edge_TP_pcd, edge_FP_pcd, spl_pcd, visible_edge_pcd])
 
         print("Mean line error: ", np.mean(line_errs))
         print("Std line error: ", np.std(line_errs))
