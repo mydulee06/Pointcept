@@ -1531,7 +1531,7 @@ class SimpleSemSegTester(TesterBase):
             rgb, depth = image_from_point_clouds([scene_pcd, edge_pred_pcd, spl_pcd], K, np.eye(4), 376, 672)
             Image.fromarray(rgb).save(os.path.join(save_path, f"{data_name}.png"))
 
-            if self.verbose and line_err > 0.01:
+            if self.verbose or line_err > 0.01:
                 o3d.visualization.draw_geometries([scene_pcd, edge_FN_pcd, edge_TP_pcd, edge_FP_pcd])
                 o3d.visualization.draw_geometries([scene_pcd, spl_gt_pcd, spl_pcd, visible_edge_pcd])
 
